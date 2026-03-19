@@ -112,6 +112,3 @@ alias qbpwa="quasar build -m pwa"
 alias qspwa="quasar serve --history dist/pwa"
 
 alias mh="~/go/bin/MailHog"
-
-alias apta-prod="k9s-sso aptast-prod arn:aws:eks:sa-east-1:050806348937:cluster/aptast-prod"
-alias apta-nonprod="k9s-sso aptast-nonprod arn:aws:eks:us-east-1:752611433692:cluster/aptast-nonprod"
