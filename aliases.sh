@@ -67,7 +67,14 @@ project_php() {
 	root=$(project_root)
 
 	if project_uses_sail; then
-		"$root/vendor/bin/sail" php "$@"
+		if [ -f "$root/sail" ]; then
+			(
+				cd "$root" || exit 1
+				bash sail php "$@"
+			)
+		else
+			"$root/vendor/bin/sail" php "$@"
+		fi
 	else
 		php_bin=$(project_php_binary)
 		"$php_bin" "$@"
