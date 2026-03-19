@@ -1,0 +1,11 @@
+[alias]
+    chs = config credentials.helper store
+    s = status
+    co = checkout
+    cob = checkout -b
+    po = !git push --set-upstream origin "$(git rev-parse --abbrev-ref HEAD)"
+    undo = reset HEAD~1 --mixed
+    res = !git reset --hard
+    br = branch --format='%(HEAD) %(color:yellow)%(refname:short)%(color:reset) - %(contents:subject) %(color:green)(%(committerdate:relative)) [%(authorname)]' --sort=-committerdate
+    lg = !git log --pretty=format:"%C(magenta)%h%Creset -%C(red)%d%Creset %s %C(dim green)(%cr) [%an]" --abbrev-commit -30
+    del = branch -D
