@@ -81,7 +81,40 @@ project_php() {
 	fi
 }
 
+project_composer() {
+	local root php_bin
+	root=$(project_root)
+
+	if project_uses_sail; then
+		if [ -f "$root/sail" ]; then
+			(
+				cd "$root" || exit 1
+				bash sail composer "$@"
+			)
+		else
+			"$root/vendor/bin/sail" composer "$@"
+		fi
+	else
+		# Prefer a system-wide `composer` binary if available
+		if command -v composer >/dev/null 2>&1; then
+			composer "$@"
+			return $?
+		fi
+
+		# Fall back to project-local composer.phar using the project's PHP
+		php_bin=$(project_php_binary)
+		if [ -f "$root/composer.phar" ]; then
+			"$php_bin" "$root/composer.phar" "$@"
+			return $?
+		fi
+
+		printf '%s\n' "composer not found; install composer or add it to PATH" >&2
+		return 1
+	fi
+}
+
 alias pp="project_php"
+alias pc="project_composer"
 alias pa="project_php artisan"
 alias cleardb="project_php artisan database:fresh --seed -y"
 alias pas="project_php artisan serve"
@@ -90,7 +123,7 @@ alias pam="project_php artisan migrate"
 alias pamr="project_php artisan migrate:rollback"
 alias pasw="project_php artisan schedule:work"
 alias paql="project_php artisan queue:listen"
-alias dev-composer="COMPOSER=composer.dev.json composer"
+alias dev-composer="project_composer --file=composer.dev.json"
 
 sail() { [ -f sail ] && bash sail "$@" || bash vendor/bin/sail "$@"; }
 alias sail-start="docker run --rm \
