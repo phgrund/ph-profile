@@ -116,7 +116,7 @@ project_composer() {
 alias pp="project_php"
 alias pc="project_composer"
 alias pa="project_php artisan"
-alias cleardb="project_php artisan database:fresh --seed -y"
+alias cleardb="project_php -d memory_limit=-1 artisan database:fresh --seed -y"
 alias pas="project_php artisan serve"
 alias pat="project_php artisan tinker"
 alias pam="project_php artisan migrate"
