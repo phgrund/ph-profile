@@ -15,7 +15,8 @@ project_root() {
 project_uses_sail() {
 	local root
 	root=$(project_root)
-	[ -f "$root/vendor/bin/sail" ]
+	[ -f "$root/vendor/bin/sail" ] || return 1
+	(cd "$root" && docker compose ps --quiet --status=running 2>/dev/null | grep -q .)
 }
 
 project_php_required_version() {
