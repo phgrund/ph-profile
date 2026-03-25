@@ -54,4 +54,6 @@ gr_tag() {
     _run git tag -a "$new_tag" -m "$message" || return 1
 
     _log "Tag created successfully: $new_tag"
+
+    _run git push origin "$new_tag" || return 1
 }
