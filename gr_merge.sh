@@ -92,3 +92,28 @@ gr_merge() {
 
   _log "Completed successfully. Final branch: $(git branch --show-current)"
 }
+
+gr_merge_deploy() {
+  emulate -L zsh
+  setopt localoptions pipefail
+
+  _log() { print -r -- "[gr_merge_deploy] $*"; }
+
+  local remote_url
+  remote_url=$(git remote get-url origin 2>/dev/null)
+  local target
+
+  if [[ "$remote_url" == *apta-backend* ]]; then
+    target="--back"
+  elif [[ "$remote_url" == *apta-frontend* ]]; then
+    target="--front"
+  else
+    _log "Error: cannot determine project type from remote: $remote_url" >&2
+    return 1
+  fi
+
+  gr_merge || return 1
+
+  _log "Running: dev-deploy $target $*"
+  dev-deploy "$target" "$@"
+}

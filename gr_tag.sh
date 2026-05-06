@@ -57,3 +57,52 @@ gr_tag() {
 
     _run git push origin "$new_tag" || return 1
 }
+
+gr_tag_deploy() {
+    emulate -L zsh
+    setopt localoptions pipefail
+
+    local message=$1
+
+    if [[ -z "$message" ]]; then
+        print -r -- "[gr_tag_deploy] Usage: gr_tag_deploy {message} [prod-deploy options]"
+        print -r -- "[gr_tag_deploy] Example: gr_tag_deploy \"Fix bug\" --notify=false"
+        return 1
+    fi
+
+    shift
+
+    local current_branch=$(git rev-parse --abbrev-ref HEAD)
+    if [[ ! $current_branch =~ ^release/[0-9]+\.[0-9]+$ ]]; then
+        print -r -- "[gr_tag_deploy] Error: not on a release/x.y branch: $current_branch" >&2
+        return 1
+    fi
+
+    local version="${current_branch#release/}"
+
+    gr_tag "$message" || return 1
+
+    local new_tag
+    new_tag=$(git tag --list | grep "^v${version}" | sort -V | tail -1)
+
+    if [[ -z "$new_tag" ]]; then
+        print -r -- "[gr_tag_deploy] Error: could not determine the created tag" >&2
+        return 1
+    fi
+
+    local remote_url
+    remote_url=$(git remote get-url origin 2>/dev/null)
+    local target
+
+    if [[ "$remote_url" == *apta-backend* ]]; then
+        target="--back"
+    elif [[ "$remote_url" == *apta-frontend* ]]; then
+        target="--front"
+    else
+        print -r -- "[gr_tag_deploy] Error: cannot determine project type from remote: $remote_url" >&2
+        return 1
+    fi
+
+    print -r -- "[gr_tag_deploy] Running: prod-deploy --tag=$new_tag $target $*"
+    prod-deploy --tag="$new_tag" "$target" "$@"
+}
