@@ -7,21 +7,43 @@ __apta_run_deploy_workflows() {
 	local deploy_front="$6"
 	local deploy_back="$7"
 
+	local workflow active_runs
+
 	if [ "$deploy_front" = "true" ]; then
-		gh workflow run "frontend-${environment}-deploy.yml" \
+		workflow="frontend-${environment}-deploy.yml"
+		active_runs=$(gh run list \
 			--repo vix-tecnologia/apta-deploy \
-			--ref main \
-			-f notify="$notify" \
-			-f "$ref_input=$ref_value"
+			--workflow "$workflow" \
+			--json status \
+			--jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting")] | length' 2>/dev/null)
+		if [ "${active_runs:-0}" -gt 0 ]; then
+			printf 'Warning: %s is already running. Skipping.\n' "$workflow" >&2
+		else
+			gh workflow run "$workflow" \
+				--repo vix-tecnologia/apta-deploy \
+				--ref main \
+				-f notify="$notify" \
+				-f "$ref_input=$ref_value"
+		fi
 	fi
 
 	if [ "$deploy_back" = "true" ]; then
-		gh workflow run "backend-${environment}-deploy.yml" \
+		workflow="backend-${environment}-deploy.yml"
+		active_runs=$(gh run list \
 			--repo vix-tecnologia/apta-deploy \
-			--ref main \
-			-f notify="$notify" \
-			-f db-migrations="$db_migrations" \
-			-f "$ref_input=$ref_value"
+			--workflow "$workflow" \
+			--json status \
+			--jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting")] | length' 2>/dev/null)
+		if [ "${active_runs:-0}" -gt 0 ]; then
+			printf 'Warning: %s is already running. Skipping.\n' "$workflow" >&2
+		else
+			gh workflow run "$workflow" \
+				--repo vix-tecnologia/apta-deploy \
+				--ref main \
+				-f notify="$notify" \
+				-f db-migrations="$db_migrations" \
+				-f "$ref_input=$ref_value"
+		fi
 	fi
 }
 
