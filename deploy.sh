@@ -1,3 +1,30 @@
+__apta_active_deploy_runs() {
+	local workflow="$1"
+	local active_window_seconds="${APTA_DEPLOY_ACTIVE_WINDOW_SECONDS:-21600}"
+
+	case "$active_window_seconds" in
+		''|*[!0-9]*)
+			active_window_seconds="21600"
+			;;
+	esac
+
+	gh run list \
+		--repo vix-tecnologia/apta-deploy \
+		--workflow "$workflow" \
+		--json status,updatedAt \
+		--jq "[
+			.[]
+			| select(
+				.status == \"in_progress\"
+				or (
+					(.status == \"queued\" or .status == \"waiting\" or .status == \"pending\" or .status == \"requested\")
+					and .updatedAt != null
+					and ((now - (.updatedAt | fromdateiso8601)) < $active_window_seconds)
+				)
+			)
+		] | length" 2>/dev/null
+}
+
 __apta_run_deploy_workflows() {
 	local environment="$1"
 	local ref_input="$2"
@@ -11,11 +38,7 @@ __apta_run_deploy_workflows() {
 
 	if [ "$deploy_front" = "true" ]; then
 		workflow="frontend-${environment}-deploy.yml"
-		active_runs=$(gh run list \
-			--repo vix-tecnologia/apta-deploy \
-			--workflow "$workflow" \
-			--json status \
-			--jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting")] | length' 2>/dev/null)
+		active_runs=$(__apta_active_deploy_runs "$workflow")
 		if [ "${active_runs:-0}" -gt 0 ]; then
 			printf 'Warning: %s is already running. Skipping.\n' "$workflow" >&2
 		else
@@ -29,11 +52,7 @@ __apta_run_deploy_workflows() {
 
 	if [ "$deploy_back" = "true" ]; then
 		workflow="backend-${environment}-deploy.yml"
-		active_runs=$(gh run list \
-			--repo vix-tecnologia/apta-deploy \
-			--workflow "$workflow" \
-			--json status \
-			--jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting")] | length' 2>/dev/null)
+		active_runs=$(__apta_active_deploy_runs "$workflow")
 		if [ "${active_runs:-0}" -gt 0 ]; then
 			printf 'Warning: %s is already running. Skipping.\n' "$workflow" >&2
 		else
