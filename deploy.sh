@@ -25,6 +25,20 @@ __apta_active_deploy_runs() {
 		] | length" 2>/dev/null
 }
 
+__apta_detect_deploy_target() {
+	local remote_url
+
+	remote_url=$(git remote get-url origin 2>/dev/null)
+
+	if [[ "$remote_url" == *apta-backend* ]]; then
+		printf '%s\n' "back"
+	elif [[ "$remote_url" == *apta-frontend* ]]; then
+		printf '%s\n' "front"
+	else
+		return 1
+	fi
+}
+
 __apta_run_deploy_workflows() {
 	local environment="$1"
 	local ref_input="$2"
@@ -293,7 +307,7 @@ prod-deploy() {
 					"Usage: prod-deploy --tag=v1.35.0 [--front] [--back] [--notify=true|false] [--db-migrations=true|false]" \
 					"       prod-deploy v1.35.0 [--front] [--back] [--notify=true|false] [--db-migrations=true|false]" \
 					"" \
-					"Requires --front or --back."
+					"Without --front or --back, the target is inferred from the local repository remote."
 				return 0
 				;;
 			--*)
@@ -318,8 +332,21 @@ prod-deploy() {
 	fi
 
 	if [ "$explicit_target" = "false" ]; then
-		printf '%s\n' "Missing required target. Use --front or --back." >&2
-		return 2
+		local detected_target
+
+		if ! detected_target=$(__apta_detect_deploy_target); then
+			printf '%s\n' "Missing required target. Use --front or --back, or run from apta-frontend/apta-backend." >&2
+			return 2
+		fi
+
+		case "$detected_target" in
+			front)
+				deploy_front="true"
+				;;
+			back)
+				deploy_back="true"
+				;;
+		esac
 	fi
 
 	__apta_run_deploy_workflows "prod" "tag" "$tag" "$notify" "$db_migrations" "$deploy_front" "$deploy_back"

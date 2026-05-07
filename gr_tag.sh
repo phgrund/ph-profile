@@ -62,15 +62,21 @@ gr_tag_deploy() {
     emulate -L zsh
     setopt localoptions pipefail
 
-    local message=$1
+    local -a message_parts deploy_args
+
+    while [[ "$#" -gt 0 && "$1" != --* ]]; do
+        message_parts+=("$1")
+        shift
+    done
+
+    local message="${(j: :)message_parts}"
+    deploy_args=("$@")
 
     if [[ -z "$message" ]]; then
         print -r -- "[gr_tag_deploy] Usage: gr_tag_deploy {message} [prod-deploy options]"
-        print -r -- "[gr_tag_deploy] Example: gr_tag_deploy \"Fix bug\" --notify=false"
+        print -r -- "[gr_tag_deploy] Example: gr_tag_deploy Fix bug --notify=false"
         return 1
     fi
-
-    shift
 
     local current_branch=$(git rev-parse --abbrev-ref HEAD)
     if [[ ! $current_branch =~ ^release/[0-9]+\.[0-9]+$ ]]; then
@@ -103,6 +109,11 @@ gr_tag_deploy() {
         return 1
     fi
 
-    print -r -- "[gr_tag_deploy] Running: prod-deploy --tag=$new_tag $target $*"
-    prod-deploy --tag="$new_tag" "$target" "$@"
+    if (( ${#deploy_args[@]} > 0 )); then
+        print -r -- "[gr_tag_deploy] Running: prod-deploy --tag=$new_tag $target ${deploy_args[*]}"
+    else
+        print -r -- "[gr_tag_deploy] Running: prod-deploy --tag=$new_tag $target"
+    fi
+
+    prod-deploy --tag="$new_tag" "$target" "${deploy_args[@]}"
 }
