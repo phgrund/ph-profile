@@ -165,6 +165,9 @@ stage-deploy() {
 	local db_migrations="true"
 	local version=""
 	local branch=""
+	local inferred_version="false"
+	local deploy_target=""
+	local release_branch_pattern='^release/[0-9]+[.][0-9]+$'
 	local deploy_front="false"
 	local deploy_back="false"
 	local explicit_target="false"
@@ -214,11 +217,12 @@ stage-deploy() {
 				;;
 			--help|-h)
 				printf '%s\n' \
-					"Usage: stage-deploy --version=1.35 [--front] [--back] [--notify=true|false] [--db-migrations=true|false]" \
+					"Usage: stage-deploy [--version=1.35] [--front] [--back] [--notify=true|false] [--db-migrations=true|false]" \
 					"       stage-deploy 1.35 [--front] [--back] [--notify=true|false] [--db-migrations=true|false]" \
 					"" \
-					"Deploys branch release/<version>." \
-					"Without --front or --back, both frontend and backend deploys are triggered."
+					"Deploys branch release/<version>. If --version is omitted from a release/<version> branch, the version is inferred." \
+					"When the version is inferred, the deploy target is detected from the current repository." \
+					"With an explicit version and no --front or --back, both frontend and backend deploys are triggered."
 				return 0
 				;;
 			--*)
@@ -238,13 +242,37 @@ stage-deploy() {
 	done
 
 	if [ -z "$version" ]; then
-		printf '%s\n' "Missing required version. Example: stage-deploy --version=1.35" >&2
+		branch=$(git branch --show-current 2>/dev/null)
+		if [[ "$branch" =~ $release_branch_pattern ]]; then
+			version="${branch#release/}"
+			inferred_version="true"
+		fi
+	fi
+
+	if [ -z "$version" ]; then
+		printf '%s\n' "Missing required version outside a release/<version> branch. Example: stage-deploy --version=1.35" >&2
 		return 2
 	fi
 
 	if [ "$explicit_target" = "false" ]; then
-		deploy_front="true"
-		deploy_back="true"
+		if [ "$inferred_version" = "true" ]; then
+			deploy_target=$(__apta_detect_deploy_target)
+			case "$deploy_target" in
+				front)
+					deploy_front="true"
+					;;
+				back)
+					deploy_back="true"
+					;;
+				*)
+					printf '%s\n' "Could not detect deploy target from current repository. Use --front or --back." >&2
+					return 2
+					;;
+			esac
+		else
+			deploy_front="true"
+			deploy_back="true"
+		fi
 	fi
 
 	branch="release/$version"
