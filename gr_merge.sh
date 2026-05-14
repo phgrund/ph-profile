@@ -10,6 +10,53 @@ gr_merge() {
     _log "$*"
     "$@"
   }
+  _merge_in_progress() {
+    git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1
+  }
+  _tree_clean() {
+    git diff --quiet && git diff --cached --quiet
+  }
+  _wait_for_merge_resolution() {
+    local source_branch="$1"
+    local target="$2"
+    local pre_merge_head="$3"
+    local current_head state last_state=""
+
+    _log "Merge conflict while merging $source_branch into $target."
+    _log "Resolve the conflicts in another terminal, then run: git add <files> && git merge --continue"
+    _log "Waiting for the merge to finish. Press Ctrl+C to stop waiting."
+
+    while true; do
+      if _merge_in_progress; then
+        state="merge-in-progress"
+      elif ! _tree_clean; then
+        state="local-changes"
+      else
+        current_head="$(git rev-parse HEAD)"
+        if [[ "$current_head" == "$pre_merge_head" ]]; then
+          _log "Merge did not complete; HEAD is unchanged. Did you abort the merge?"
+          return 1
+        fi
+
+        _log "Merge resolution detected. Continuing."
+        return 0
+      fi
+
+      if [[ "$state" != "$last_state" ]]; then
+        case "$state" in
+          merge-in-progress)
+            _log "Still waiting: merge is in progress."
+            ;;
+          local-changes)
+            _log "Still waiting: merge state ended but local changes remain."
+            ;;
+        esac
+        last_state="$state"
+      fi
+
+      sleep 5
+    done
+  }
 
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     _log "Error: this directory is not a Git repository."
@@ -77,13 +124,19 @@ gr_merge() {
   local target
   for target in "${chain[@]}"; do
     _log "Propagating: $source_branch -> $target"
+    local pre_merge_head
 
     _run git switch "$target" || return 1
     _run git pull origin "$target" || return 1
 
+    pre_merge_head="$(git rev-parse HEAD)"
     if ! _run git merge "$source_branch"; then
-      _log "Merge conflict while merging $source_branch into $target. Resolve it manually."
-      return 1
+      if _merge_in_progress; then
+        _wait_for_merge_resolution "$source_branch" "$target" "$pre_merge_head" || return 1
+      else
+        _log "Merge failed and no merge is in progress."
+        return 1
+      fi
     fi
 
     _run git push origin "$target" || return 1
