@@ -58,6 +58,8 @@ gr_merge() {
     done
   }
 
+  local version="${1:-}"
+
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     _log "Error: this directory is not a Git repository."
     return 1
@@ -66,6 +68,13 @@ gr_merge() {
   if ! git diff --quiet || ! git diff --cached --quiet; then
     _log "Error: there are local changes (staged/unstaged)."
     return 1
+  fi
+
+  if [[ -n "$version" ]]; then
+    local release_branch="release/$version"
+    _run git fetch origin || return 1
+    _run git switch "$release_branch" || return 1
+    _run git pull origin "$release_branch" || return 1
   fi
 
   local current
@@ -130,7 +139,7 @@ gr_merge() {
     _run git pull origin "$target" || return 1
 
     pre_merge_head="$(git rev-parse HEAD)"
-    if ! _run git merge "$source_branch"; then
+    if ! _run git merge --no-edit "$source_branch"; then
       if _merge_in_progress; then
         _wait_for_merge_resolution "$source_branch" "$target" "$pre_merge_head" || return 1
       else
