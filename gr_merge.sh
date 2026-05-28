@@ -130,7 +130,7 @@ gr_merge() {
     _run git pull origin "$target" || return 1
 
     pre_merge_head="$(git rev-parse HEAD)"
-    if ! _run git merge "$source_branch"; then
+    if ! _run git merge --no-edit "$source_branch"; then
       if _merge_in_progress; then
         _wait_for_merge_resolution "$source_branch" "$target" "$pre_merge_head" || return 1
       else
