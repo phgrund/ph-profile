@@ -117,3 +117,11 @@ gr_tag_deploy() {
 
     prod-deploy --tag="$new_tag" "$target" "${deploy_args[@]}"
 }
+
+gr_tag_deploy_merge() {
+    emulate -L zsh
+    setopt localoptions pipefail
+
+    gr_tag_deploy "$@" || return 1
+    gr_merge
+}

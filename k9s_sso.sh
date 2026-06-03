@@ -7,6 +7,11 @@ k9s_sso() {
     _log "$*"
     "$@"
   }
+  _aws_credentials_ready() {
+    command aws configure export-credentials \
+      --profile "$PROFILE" \
+      --format env-no-export >/dev/null 2>&1
+  }
 
   local PROFILE="$1"
   local CONTEXT="$2"
@@ -16,18 +21,23 @@ k9s_sso() {
     return 1
   fi
 
-  _log "Checking AWS SSO session for profile: $PROFILE"
+  _log "Checking cached AWS credentials for profile: $PROFILE"
 
-  if ! AWS_PROFILE=$PROFILE aws sts get-caller-identity >/dev/null 2>&1; then
-    _log "SSO session expired. Running login..."
-    _run env AWS_PROFILE=$PROFILE aws sso login || return 1
+  if ! _aws_credentials_ready; then
+    _log "No reusable AWS SSO session found. Running login..."
+    _run aws sso login --profile "$PROFILE" || return 1
+
+    if ! _aws_credentials_ready; then
+      _log "AWS credentials are still unavailable after login"
+      return 1
+    fi
   fi
 
   if [[ -n "$CONTEXT" ]]; then
     _log "Starting k9s with context: $CONTEXT"
-    exec command k9s --context "$CONTEXT"
+    exec env AWS_PROFILE="$PROFILE" k9s --context "$CONTEXT"
   else
     _log "Starting k9s without an explicit context"
-    exec command k9s
+    exec env AWS_PROFILE="$PROFILE" k9s
   fi
 }
