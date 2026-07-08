@@ -35,9 +35,9 @@ k9s_sso() {
 
   if [[ -n "$CONTEXT" ]]; then
     _log "Starting k9s with context: $CONTEXT"
-    exec env AWS_PROFILE="$PROFILE" k9s --context "$CONTEXT"
+    env AWS_PROFILE="$PROFILE" k9s --context "$CONTEXT" -n all
   else
     _log "Starting k9s without an explicit context"
-    exec env AWS_PROFILE="$PROFILE" k9s
+    env AWS_PROFILE="$PROFILE" k9s -n all
   fi
 }
