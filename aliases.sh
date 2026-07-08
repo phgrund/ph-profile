@@ -78,6 +78,7 @@ project_php() {
 		fi
 	else
 		php_bin=$(project_php_binary)
+		command -v "$php_bin" >/dev/null 2>&1 || return 0
 		"$php_bin" "$@"
 	fi
 }
