@@ -78,7 +78,15 @@ project_php() {
 		fi
 	else
 		php_bin=$(project_php_binary)
-		command -v "$php_bin" >/dev/null 2>&1 || return 0
+		if ! command -v "$php_bin" >/dev/null 2>&1; then
+			# ponytail: sem php local, tenta o sail mesmo com containers parados
+			if [ -f "$root/vendor/bin/sail" ]; then
+				"$root/vendor/bin/sail" php "$@"
+				return $?
+			fi
+			printf '%s\n' "php not found and no sail in project" >&2
+			return 1
+		fi
 		"$php_bin" "$@"
 	fi
 }
