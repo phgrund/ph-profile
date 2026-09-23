@@ -32,7 +32,22 @@ gr_tag() {
     # Extract the version from the branch name, e.g. 1.30 from release/1.30.
     local version="${current_branch#release/}"
 
-    _run git pull --tags || return 1
+    _run git pull --tags --ff-only origin "$current_branch" || return 1
+    _run git fetch -q origin develop || return 1
+
+    # Guards: only tag what is actually on the remote release branch, and never
+    # tag a release branch that has swallowed develop (i.e. work from later
+    # releases that leaked in via a fast-forward push or a wrong-upstream pull).
+    if [[ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$current_branch")" ]]; then
+        _log "Error: HEAD differs from origin/$current_branch - push or reset before tagging."
+        return 1
+    fi
+
+    if git merge-base --is-ancestor origin/develop HEAD; then
+        _log "Error: $current_branch contains all of develop - it swallowed work from later releases."
+        _log "Fix the branch before tagging."
+        return 1
+    fi
 
     local last_tag=$(git tag --list | grep "$version" | sort -V | tail -1)
 
