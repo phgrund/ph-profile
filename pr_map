@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+# PR Map
+# Draws every open PR as a branch tree (who branches from whom) into a standalone HTML page.
+# Example: pr_map --back -> only apta-backend; no flag -> backend and frontend.
+
+import argparse
+import html
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import webbrowser
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPOS = {"back": "vix-tecnologia/apta-backend", "front": "vix-tecnologia/apta-frontend"}
+FIELDS = "number,title,headRefName,baseRefName,author,isDraft,reviewDecision,mergeable,additions,deletions,updatedAt,body"
+CLICKUP = re.compile(r"https://app\.clickup\.com/t/[A-Za-z0-9/]+")
+STALE_DAYS = 14
+MONTHS = "jan fev mar abr mai jun jul ago set out nov dez".split()
+REVIEW = {
+    "APPROVED": ("ok", "approved"),
+    "CHANGES_REQUESTED": ("no", "changes req"),
+    "REVIEW_REQUIRED": ("wt", "review req"),
+}
+
+CSS = """
+:root { --text-primary:#1a1a18; --text-secondary:#444441; --text-muted:#6b6a65; --text-accent:#1f4fbf;
+  --border:#e2e0d8; --border-strong:#c9c7bf; --surface-1:#f6f5f0; --bg:#fbfaf6;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ch-f:#F1EFE8; --ch-c:#444441; --ok-f:#EAF3DE; --ok-c:#27500A; --no-f:#FCEBEB; --no-c:#791F1F; --wt-f:#FAEEDA; --wt-c:#633806; }
+@media (prefers-color-scheme: dark) { :root { --text-primary:#ecebe4; --text-secondary:#d3d1c7; --text-muted:#9c9a92;
+  --text-accent:#8ab4ff; --border:#3a3936; --border-strong:#55534d; --surface-1:#2a2a27; --bg:#1c1c1a;
+  --ch-f:#444441; --ch-c:#D3D1C7; --ok-f:#27500A; --ok-c:#C0DD97; --no-f:#791F1F; --no-c:#F7C1C1; --wt-f:#633806; --wt-c:#FAC775; } }
+body { background: var(--bg); margin: 0; padding: 16px; font-family: system-ui, sans-serif; }
+.wrap { font-size: 13px; line-height: 1.35; color: var(--text-primary); max-width: 900px; margin: 0 auto; }
+h2 { font-size: 15px; margin: 8px 0 12px; }
+h2 small { font-weight: 400; color: var(--text-muted); }
+.root { margin: 0 0 18px; }
+.roothd { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; padding:6px 10px;
+  border:1px solid var(--border-strong); border-radius:6px; background: var(--surface-1); }
+.rootnm { font-family: var(--font-mono); font-weight:600; }
+.rootmeta { font-size:11px; color: var(--text-muted); }
+.kids { margin-left:13px; padding-left:15px; border-left:1px solid var(--border-strong); }
+.node { position:relative; padding:7px 0; }
+.node::before { content:''; position:absolute; left:-15px; top:17px; width:11px; height:1px; background: var(--border-strong); }
+.l1 { display:flex; align-items:baseline; gap:7px; flex-wrap:wrap; }
+.pr { font-family: var(--font-mono); font-weight:600; font-size:12px; text-decoration:none; color: var(--text-accent);
+  border:1px solid var(--border-strong); border-radius:4px; padding:1px 5px; white-space:nowrap; }
+.l2 { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:3px; font-size:11px; color: var(--text-muted); }
+.br { font-family: var(--font-mono); color: var(--text-secondary); overflow-wrap:anywhere; }
+.cu { text-decoration:none; color: var(--text-accent); font-weight:500; white-space:nowrap; }
+.ch { background:var(--ch-f); color:var(--ch-c); border-radius:3px; padding:1px 5px; font-size:10px; font-weight:600; white-space:nowrap; }
+.ch.ok { background:var(--ok-f); color:var(--ok-c) } .ch.no { background:var(--no-f); color:var(--no-c) } .ch.wt { background:var(--wt-f); color:var(--wt-c) }
+.leg { display:flex; gap:10px; flex-wrap:wrap; padding-top:10px; border-top:1px solid var(--border); font-size:11px; color: var(--text-muted); }
+"""
+
+LEGEND = """<div class="leg">
+ <span><span class="ch ok">approved</span> aprovada</span>
+ <span><span class="ch no">changes req</span> mudanças pedidas</span>
+ <span><span class="ch wt">review req</span> aguardando review</span>
+ <span><span class="ch">draft</span> rascunho</span>
+ <span><span class="ch no">conflito</span> merge conflitante</span>
+</div>"""
+
+esc = html.escape
+
+
+def gh(*args: str) -> str:
+    # ponytail: gh falls over now and then, 3 tries and give up
+    for _ in range(3):
+        result = subprocess.run(["gh", *args], capture_output=True, text=True)
+        if result.returncode == 0:
+            return result.stdout
+    sys.exit(f"[pr_map] gh {' '.join(args)}: {result.stderr.strip()}")
+
+
+def kilo(n: int) -> str:
+    return f"{n / 1000:.1f}k".replace(".0k", "k").replace(".", ",") if n >= 1000 else str(n)
+
+
+def idle_days(pr: dict) -> int:
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(pr["updatedAt"].replace("Z", "+00:00"))).days
+
+
+def is_zombie(pr: dict) -> bool:
+    return pr["isDraft"] and pr["mergeable"] == "CONFLICTING" and idle_days(pr) > STALE_DAYS
+
+
+def render_node(pr: dict, kids_of: dict, repo: str, me: str) -> str:
+    title = esc(pr["title"])
+    if pr["additions"] + pr["deletions"] > 5000:
+        title += f' <small>+{kilo(pr["additions"])}/−{kilo(pr["deletions"])}</small>'
+
+    author = "você" if pr["author"]["login"] == me else (pr["author"].get("name") or pr["author"]["login"]).split()[0]
+    css, label = REVIEW.get(pr["reviewDecision"] or "", ("wt", "sem review"))
+    chips = [f'<span class="ch {css}">{label}</span>']
+    if pr["isDraft"]:
+        chips.append('<span class="ch">draft</span>')
+    if pr["mergeable"] == "CONFLICTING":
+        chips.append('<span class="ch no">conflito</span>')
+
+    links = list(dict.fromkeys(CLICKUP.findall(pr["body"] or "")))
+    clickup = [f'<a class="cu" href="{esc(u)}">ClickUp{f" {i + 1}" if i else ""} ↗</a>' for i, u in enumerate(links)] or ["<span>sem ClickUp</span>"]
+
+    if idle_days(pr) > STALE_DAYS:
+        updated = datetime.fromisoformat(pr["updatedAt"].replace("Z", "+00:00"))
+        clickup.append(f"<span>parada desde {updated.day:02d}/{MONTHS[updated.month - 1]}</span>")
+
+    kids = kids_of.get(pr["headRefName"], [])
+    sub = f'<div class="kids">{"".join(render_node(k, kids_of, repo, me) for k in ordered(kids, kids_of))}</div>' if kids else ""
+
+    return (
+        f'<div class="node"><div class="l1"><a class="pr" href="https://github.com/{repo}/pull/{pr["number"]}">#{pr["number"]}</a>'
+        f'<span>{title}</span></div><div class="l2"><span class="br">{esc(pr["headRefName"])}</span>·<span>{esc(author)}</span>'
+        f'{"".join(chips)}{"".join(clickup)}</div>{sub}</div>'
+    )
+
+
+def ordered(prs: list, kids_of: dict) -> list:
+    """Chains first, then loose leaves, zombies last."""
+    return sorted(prs, key=lambda pr: 0 if pr["headRefName"] in kids_of else 2 if is_zombie(pr) else 1)
+
+
+def render_repo(repo: str, me: str) -> str:
+    prs = json.loads(gh("pr", "list", "-R", repo, "--state", "open", "--limit", "200", "--json", FIELDS))
+    default = gh("repo", "view", repo, "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name").strip()
+
+    kids_of: dict[str, list] = {}
+    for pr in prs:
+        kids_of.setdefault(pr["baseRefName"], []).append(pr)
+    heads = {pr["headRefName"] for pr in prs}
+
+    behind = {
+        base: 0 if base == default else int(gh("api", f"repos/{repo}/compare/{base}...{default}", "-q", ".ahead_by"))
+        for base in kids_of
+        if base not in heads
+    }
+    roots = sorted(behind, key=lambda base: (base != default, behind[base]))
+
+    sections = []
+    for base in roots:
+        meta = "base principal" if base == default else f"{behind[base]} commits atrás de {default}"
+        nodes = "".join(render_node(pr, kids_of, repo, me) for pr in ordered(kids_of[base], kids_of))
+        sections.append(
+            f'<div class="root"><div class="roothd"><span class="rootnm">{esc(base)}</span>'
+            f'<span class="rootmeta">{meta}</span></div><div class="kids">{nodes}</div></div>'
+        )
+
+    return f'<h2>{repo} <small>{len(prs)} PRs abertas</small></h2>{"".join(sections)}'
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Mapa das PRs abertas. Sem flag: backend e frontend.")
+    parser.add_argument("--back", action="store_true", help="apta-backend")
+    parser.add_argument("--front", action="store_true", help="apta-frontend")
+    parser.add_argument("-o", "--output", help="padrão: /tmp/pr-map-<random>.html")
+    args = parser.parse_args()
+
+    picked = [key for key in REPOS if getattr(args, key)] or list(REPOS)
+    me = gh("api", "user", "-q", ".login").strip()
+    body = "".join(render_repo(REPOS[key], me) for key in picked)
+    output = args.output or tempfile.mkstemp(prefix="pr-map-", suffix=".html")[1]
+
+    Path(output).write_text(
+        f'<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">'
+        f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>PR Map</title><base target="_blank">'
+        f"<style>{CSS}</style></head><body><div class=\"wrap\">{body}{LEGEND}</div></body></html>"
+    )
+    print(f"file://{output}")
+    webbrowser.open(f"file://{output}")
+
+
+if __name__ == "__main__":
+    main()
